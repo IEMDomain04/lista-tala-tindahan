@@ -2,7 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
-// --- Types ---
+// ==========================================
+// 1. TYPES & INTERFACES
+// Defining the exact shape of our data helps catch errors early.
+// ==========================================
 type TransactionType = 'income' | 'expense' | 'receivable';
 
 interface Transaction {
@@ -15,23 +18,36 @@ interface Transaction {
 }
 
 export default function App() {
-  // --- State ---
+  // ==========================================
+  // 2. APPLICATION STATE
+  // These variables hold the data that changes while the app is running.
+  // ==========================================
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [chatInput, setChatInput] = useState('');
   const [isSending, setIsSending] = useState(false);
 
-  // ⚠️ IMPORTANT: Paste the UUID of the vendor you created in Supabase here!
-  const TEST_VENDOR_ID = 1;
+  // NEW: Instead of a hardcoded variable, we use state to track the active vendor.
+  // We default to vendor ID 1 on load.
+  const [activeVendorId, setActiveVendorId] = useState<number>(1);
 
-  // --- 1. Fetch Data on Load ---
+  // ==========================================
+  // 3. DATABASE FETCHING LOGIC
+  // ==========================================
+  
+  // useEffect runs the code inside it automatically. 
+  // By putting [activeVendorId] in the array at the end, we tell React:
+  // "Every time the user switches the vendor, run fetchTransactions() again."
   useEffect(() => {
     fetchTransactions();
-  }, []);
+  }, [activeVendorId]); 
 
   const fetchTransactions = async () => {
+    // We ask Supabase for transactions, but use .eq() to act as a strict filter
+    // so Vendor 1 never sees Vendor 2's data.
     const { data, error } = await supabase
       .from('transactions')
       .select('*')
+      .eq('vendor_id', activeVendorId) // FILTER: Only grab rows matching the active vendor
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -41,7 +57,9 @@ export default function App() {
     }
   };
 
-  // --- 2. Process Chat & Insert to Supabase (UPGRADED NLP) ---
+  // ==========================================
+  // 4. MOCK NLP & DATABASE INSERT LOGIC
+  // ==========================================
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatInput.trim()) return;
@@ -49,24 +67,24 @@ export default function App() {
 
     const lowerInput = chatInput.toLowerCase();
     
-    // 1. Split the sentence into smaller thoughts (clauses)
-    // We split by commas, or conjunctions like "pero", "at", "tapos"
+    // Split the sentence by commas or conjunctions to handle multiple thoughts
     const clauses = lowerInput.split(/,|\bpero\b|\bat\b|\btapos\b/);
     
+    // Prepare an array to hold all the rows we are about to insert
     const newDbRows: Omit<Transaction, 'id' | 'created_at'>[] = [];
 
-    // 2. Analyze each clause individually
+    // Loop through each piece of the sentence to extract the meaning
     clauses.forEach((clause) => {
-      // Find the number in THIS specific clause
+      // Look for a number using a Regular Expression
       const amountMatch = clause.match(/\d+/);
       
-      // If there is no number in this part of the sentence, skip it
+      // If no number is found in this clause, skip it and move to the next one
       if (!amountMatch) return; 
 
       const detectedAmount = parseInt(amountMatch[0], 10);
-      let detectedType: TransactionType = 'income'; // Default to benta
+      let detectedType: TransactionType = 'income'; // Assume it's income by default
 
-      // Look for keywords ONLY within this specific clause
+      // Scan the clause for specific keywords to adjust the transaction type
       if (clause.includes('gastos') || clause.includes('bili') || clause.includes('puhunan') || clause.includes('bayad')) {
         detectedType = 'expense';
       } else if (clause.includes('utang')) {
@@ -75,22 +93,23 @@ export default function App() {
         detectedType = 'income';
       }
 
+      // Package the extracted data into a neat object and push it to our array
       newDbRows.push({
-        vendor_id: TEST_VENDOR_ID,
-        description: clause.trim(), // Saves just that specific part of the sentence!
+        vendor_id: activeVendorId, // Assign it to whichever vendor is currently selected!
+        description: clause.trim(), 
         amount: detectedAmount,
         type: detectedType,
       });
     });
 
-    // Fallback if no numbers were found at all
+    // Guard clause: If the NLP couldn't find any numbers at all, stop the process
     if (newDbRows.length === 0) {
       alert("Oops! Walang numero. Try adding an amount (e.g., 'benta 100')");
       setIsSending(false);
       return;
     }
 
-    // 3. Send ALL detected transactions to Supabase in one go
+    // Send the array of new rows directly to the Supabase database
     const { data, error } = await supabase
       .from('transactions')
       .insert(newDbRows)
@@ -100,8 +119,8 @@ export default function App() {
       console.error('Database Error:', error.message);
       alert('Failed to save. Check console for details.');
     } else if (data) {
-      // Instantly update the UI with the fresh data from the DB
-      // We spread the new data array so both transactions show up at once
+      // If successful, take the newly created database rows and merge them 
+      // into the current UI state so the dashboard updates instantly without refreshing.
       setTransactions([...data, ...transactions]);
       setChatInput('');
     }
@@ -109,31 +128,50 @@ export default function App() {
     setIsSending(false);
   };
 
-  // --- 3. Dashboard Calculations ---
+  // ==========================================
+  // 5. DASHBOARD METRICS CALCULATIONS
+  // ==========================================
+  // We use .filter() to isolate specific types, and .reduce() to sum up the amounts.
   const totalIncome = transactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0);
   const totalExpense = transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0);
   const totalReceivable = transactions.filter(t => t.type === 'receivable').reduce((sum, t) => sum + t.amount, 0);
 
+  // Format the data exactly how Recharts needs it to draw the bar graph
   const chartData = [
     { name: 'Income', amount: totalIncome, fill: '#10B981' },
     { name: 'Expenses', amount: totalExpense, fill: '#EF4444' },
     { name: 'Utang', amount: totalReceivable, fill: '#F59E0B' },
   ];
 
-  // --- 4. Render UI ---
+  // ==========================================
+  // 6. UI RENDERING
+  // ==========================================
   return (
     <div className="min-h-screen bg-gray-50 p-8 font-sans text-gray-800">
       <div className="max-w-5xl mx-auto space-y-8">
         
+        {/* HEADER AREA */}
         <header className="flex justify-between items-center">
           <h1 className="text-2xl font-semibold tracking-tight">Tala-Tindahan</h1>
-          <span className="text-sm font-medium text-gray-500 bg-gray-200 px-3 py-1 rounded-full">Aling Nena's Store</span>
+          
+          {/* NEW: Dynamic Vendor Switcher Dropdown */}
+          <select 
+            value={activeVendorId} 
+            onChange={(e) => setActiveVendorId(Number(e.target.value))}
+            className="text-sm font-medium text-gray-700 bg-gray-200 px-4 py-2 rounded-full outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer border-r-8 border-transparent"
+          >
+            <option value={1}>Aling Nena's Store</option>
+            <option value={2}>Mang Kanors Store</option>
+            <option value={3}>Juan dela cruz Tindahan</option>
+          </select>
         </header>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           
-          {/* Left Column: Chat */}
+          {/* LEFT COLUMN: Input & History */}
           <div className="lg:col-span-1 space-y-6">
+            
+            {/* Input Box */}
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
               <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4">Chat Logger</h2>
               <form onSubmit={handleSendMessage} className="space-y-4">
@@ -154,6 +192,7 @@ export default function App() {
               </form>
             </div>
 
+            {/* Recent Transactions */}
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
               <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4">Recent (Live from DB)</h2>
               <div className="space-y-3">
@@ -170,8 +209,10 @@ export default function App() {
             </div>
           </div>
 
-          {/* Right Column: Dashboard */}
+          {/* RIGHT COLUMN: Dashboard Visualization */}
           <div className="lg:col-span-2 space-y-6">
+            
+            {/* Scorecards */}
             <div className="grid grid-cols-3 gap-4">
               <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
                 <p className="text-sm text-gray-500 font-medium">Total Benta</p>
@@ -187,6 +228,7 @@ export default function App() {
               </div>
             </div>
 
+            {/* Chart */}
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 h-80">
               <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-6">Cash Flow Overview</h2>
               <ResponsiveContainer width="100%" height="100%">
