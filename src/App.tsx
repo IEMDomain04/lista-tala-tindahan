@@ -1,10 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { supabase } from './supabaseClient';
+import React, { useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 // ==========================================
 // 1. TYPES & INTERFACES
-// Defining the exact shape of our data helps catch errors early.
 // ==========================================
 type TransactionType = 'income' | 'expense' | 'receivable';
 
@@ -17,235 +15,192 @@ interface Transaction {
   created_at: string;
 }
 
-export default function App() {
-  // ==========================================
-  // 2. APPLICATION STATE
-  // These variables hold the data that changes while the app is running.
-  // ==========================================
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
+// ==========================================
+// 2. MOCK DATA (Replaces Database Fetching)
+// ==========================================
+const MOCK_DATA: Transaction[] = [
+  { id: '1', vendor_id: 1, description: 'nakabenta ako ng 10 piso na yema', amount: 10, type: 'income', created_at: new Date().toISOString() },
+  { id: '2', vendor_id: 1, description: 'nagastos ko rin yung 10', amount: 10, type: 'expense', created_at: new Date().toISOString() },
+  { id: '3', vendor_id: 1, description: '500 benta sa drinks', amount: 500, type: 'income', created_at: new Date().toISOString() },
+];
+
+// ==========================================
+// 3. UI COMPONENTS
+// ==========================================
+const MetricCard = ({ title, value, colorClass }: { title: string, value: number, colorClass: string }) => (
+  <div className="bg-slate-900 p-5 rounded-xl border border-slate-800 flex flex-col justify-center">
+    <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider mb-1">{title}</p>
+    <p className={`text-2xl font-bold ${colorClass}`}>₱{value.toLocaleString()}</p>
+  </div>
+);
+
+// ==========================================
+// 4. MAIN APPLICATION COMPONENT (UI ONLY)
+// ==========================================
+export default function QuantumNLPLedger() {
+  // Initialize state with mock data instead of an empty array
+  const [transactions, setTransactions] = useState<Transaction[]>(MOCK_DATA);
   const [chatInput, setChatInput] = useState('');
-  const [isSending, setIsSending] = useState(false);
-
-  // NEW: Instead of a hardcoded variable, we use state to track the active vendor.
-  // We default to vendor ID 1 on load.
+  const [isProcessing, setIsProcessing] = useState(false);
   const [activeVendorId, setActiveVendorId] = useState<number>(1);
+  const [toastMessage, setToastMessage] = useState<{ text: string; type: 'error' | 'success' } | null>(null);
 
-  // ==========================================
-  // 3. DATABASE FETCHING LOGIC
-  // ==========================================
-  
-  // useEffect runs the code inside it automatically. 
-  // By putting [activeVendorId] in the array at the end, we tell React:
-  // "Every time the user switches the vendor, run fetchTransactions() again."
-  useEffect(() => {
-    fetchTransactions();
-  }, [activeVendorId]); 
-
-  const fetchTransactions = async () => {
-    // We ask Supabase for transactions, but use .eq() to act as a strict filter
-    // so Vendor 1 never sees Vendor 2's data.
-    const { data, error } = await supabase
-      .from('transactions')
-      .select('*')
-      .eq('vendor_id', activeVendorId) // FILTER: Only grab rows matching the active vendor
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      console.error('Error fetching data:', error.message);
-    } else if (data) {
-      setTransactions(data);
-    }
+  const showToast = (text: string, type: 'error' | 'success') => {
+    setToastMessage({ text, type });
+    setTimeout(() => setToastMessage(null), 3000);
   };
 
-  // ==========================================
-  // 4. MOCK NLP & DATABASE INSERT LOGIC
-  // ==========================================
-  const handleSendMessage = async (e: React.FormEvent) => {
+  // Simulated Frontend Submission (No Backend/NLP Logic)
+  const handleSystemInput = (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatInput.trim()) return;
-    setIsSending(true);
+    setIsProcessing(true);
 
-    const lowerInput = chatInput.toLowerCase();
-    
-    // Split the sentence by commas or conjunctions to handle multiple thoughts
-    const clauses = lowerInput.split(/,|\bpero\b|\bat\b|\btapos\b/);
-    
-    // Prepare an array to hold all the rows we are about to insert
-    const newDbRows: Omit<Transaction, 'id' | 'created_at'>[] = [];
+    // Simulate a network request delay
+    setTimeout(() => {
+      // Create a dummy transaction just so the UI updates
+      const dummyTransaction: Transaction = {
+        id: Math.random().toString(),
+        vendor_id: activeVendorId,
+        description: chatInput, // Just echoing the input back
+        amount: Math.floor(Math.random() * 1000) + 100, // Random amount
+        type: 'income', // Hardcoded for demo purposes
+        created_at: new Date().toISOString()
+      };
 
-    // Loop through each piece of the sentence to extract the meaning
-    clauses.forEach((clause) => {
-      // Look for a number using a Regular Expression
-      const amountMatch = clause.match(/\d+/);
-      
-      // If no number is found in this clause, skip it and move to the next one
-      if (!amountMatch) return; 
-
-      const detectedAmount = parseInt(amountMatch[0], 10);
-      let detectedType: TransactionType = 'income'; // Assume it's income by default
-
-      // Scan the clause for specific keywords to adjust the transaction type
-      if (clause.includes('gastos') || clause.includes('bili') || clause.includes('puhunan') || clause.includes('bayad')) {
-        detectedType = 'expense';
-      } else if (clause.includes('utang')) {
-        detectedType = 'receivable';
-      } else if (clause.includes('benta') || clause.includes('kita')) {
-        detectedType = 'income';
-      }
-
-      // Package the extracted data into a neat object and push it to our array
-      newDbRows.push({
-        vendor_id: activeVendorId, // Assign it to whichever vendor is currently selected!
-        description: clause.trim(), 
-        amount: detectedAmount,
-        type: detectedType,
-      });
-    });
-
-    // Guard clause: If the NLP couldn't find any numbers at all, stop the process
-    if (newDbRows.length === 0) {
-      alert("Oops! Walang numero. Try adding an amount (e.g., 'benta 100')");
-      setIsSending(false);
-      return;
-    }
-
-    // Send the array of new rows directly to the Supabase database
-    const { data, error } = await supabase
-      .from('transactions')
-      .insert(newDbRows)
-      .select(); 
-
-    if (error) {
-      console.error('Database Error:', error.message);
-      alert('Failed to save. Check console for details.');
-    } else if (data) {
-      // If successful, take the newly created database rows and merge them 
-      // into the current UI state so the dashboard updates instantly without refreshing.
-      setTransactions([...data, ...transactions]);
+      setTransactions([dummyTransaction, ...transactions]);
       setChatInput('');
-    }
-    
-    setIsSending(false);
+      showToast("Mock transaction logged (Frontend only).", "success");
+      setIsProcessing(false);
+    }, 800); // 800ms simulated delay
   };
 
-  // ==========================================
-  // 5. DASHBOARD METRICS CALCULATIONS
-  // ==========================================
-  // We use .filter() to isolate specific types, and .reduce() to sum up the amounts.
+  // Metrics Logic (Running off local state)
   const totalIncome = transactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0);
   const totalExpense = transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0);
   const totalReceivable = transactions.filter(t => t.type === 'receivable').reduce((sum, t) => sum + t.amount, 0);
 
-  // Format the data exactly how Recharts needs it to draw the bar graph
   const chartData = [
     { name: 'Income', amount: totalIncome, fill: '#10B981' },
     { name: 'Expenses', amount: totalExpense, fill: '#EF4444' },
     { name: 'Utang', amount: totalReceivable, fill: '#F59E0B' },
   ];
 
-  // ==========================================
-  // 6. UI RENDERING
-  // ==========================================
   return (
-    <div className="min-h-screen bg-gray-50 p-8 font-sans text-gray-800">
-      <div className="max-w-5xl mx-auto space-y-8">
+    <div className="min-h-screen bg-slate-950 p-6 font-sans text-slate-200 selection:bg-cyan-900 selection:text-cyan-50">
+      
+      {/* Toast Notification System */}
+      {toastMessage && (
+        <div className={`fixed top-6 left-1/2 transform -translate-x-1/2 px-6 py-3 rounded-full text-sm font-medium shadow-lg z-50 transition-all ${toastMessage.type === 'error' ? 'bg-red-900/90 text-red-100 border border-red-700' : 'bg-emerald-900/90 text-emerald-100 border border-emerald-700'}`}>
+          {toastMessage.text}
+        </div>
+      )}
+
+      <div className="max-w-6xl mx-auto space-y-6">
         
-        {/* HEADER AREA */}
-        <header className="flex justify-between items-center">
-          <h1 className="text-2xl font-semibold tracking-tight">Tala-Tindahan</h1>
+        {/* Header / Command Center Bar */}
+        <header className="flex justify-between items-center bg-slate-900 px-6 py-4 rounded-xl border border-slate-800">
+          <div className="flex items-center space-x-3">
+            <div className="w-3 h-3 rounded-full bg-emerald-500 animate-pulse"></div>
+            <h1 className="text-xl font-bold tracking-tight text-slate-100">QuantumNLP System UI</h1>
+          </div>
           
-          {/* NEW: Dynamic Vendor Switcher Dropdown */}
           <select 
             value={activeVendorId} 
             onChange={(e) => setActiveVendorId(Number(e.target.value))}
-            className="text-sm font-medium text-gray-700 bg-gray-200 px-4 py-2 rounded-full outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer border-r-8 border-transparent"
+            className="bg-slate-950 text-sm font-medium text-slate-300 border border-slate-700 px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-cyan-600 cursor-pointer"
           >
-            <option value={1}>Aling Nena's Store</option>
-            <option value={2}>Mang Kanors Store</option>
-            <option value={3}>Juan dela cruz Tindahan</option>
+            <option value={1}>Vendor Data: Aling Nena</option>
+            <option value={2}>Vendor Data: Mang Kanor</option>
+            <option value={3}>Vendor Data: Juans Tinda</option>
           </select>
         </header>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           
-          {/* LEFT COLUMN: Input & History */}
-          <div className="lg:col-span-1 space-y-6">
+          {/* LEFT PANEL: Input & System Logs */}
+          <div className="lg:col-span-5 space-y-6">
             
-            {/* Input Box */}
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-              <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4">Chat Logger</h2>
-              <form onSubmit={handleSendMessage} className="space-y-4">
+            {/* Input Console */}
+            <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-xl">
+              <h2 className="text-xs font-semibold text-cyan-500 uppercase tracking-widest mb-4 flex items-center">
+                <span className="mr-2">⚡</span> Demo Input Portal
+              </h2>
+              <form onSubmit={handleSystemInput} className="space-y-4">
                 <textarea
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
-                  placeholder='Try: "benta ko ngayon 1500" or "gastos sa yelo 50"'
-                  className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none h-24 text-sm"
-                  disabled={isSending}
+                  placeholder="Type anything here to test the UI..."
+                  className="w-full p-4 bg-slate-950 border border-slate-700 rounded-lg focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 resize-none h-28 text-sm placeholder-slate-600"
+                  disabled={isProcessing}
+                  autoFocus
                 />
                 <button 
                   type="submit"
-                  disabled={isSending}
-                  className="cursor-pointer w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 rounded-xl transition-colors disabled:opacity-50"
+                  disabled={isProcessing}
+                  className="w-full bg-cyan-700 hover:bg-cyan-600 text-white text-sm font-semibold py-3 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center"
                 >
-                  {isSending ? 'Saving...' : 'Send to Ledger'}
+                  {isProcessing ? (
+                    <span className="flex items-center">
+                      <svg className="animate-spin -ml-1 mr-3 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                      Simulating Delay...
+                    </span>
+                  ) : 'Test UI Interaction'}
                 </button>
               </form>
             </div>
 
-            {/* Recent Transactions */}
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-              <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4">Recent (Live from DB)</h2>
-              <div className="space-y-3">
-                {transactions.length === 0 && <p className="text-sm text-gray-400">No transactions yet.</p>}
-                {transactions.slice(0, 5).map((tx) => (
-                  <div key={tx.id} className="flex justify-between items-center text-sm p-3 bg-gray-50 rounded-lg">
-                    <span className="truncate pr-4 text-gray-600">{tx.description}</span>
-                    <span className={`font-medium ${tx.type === 'income' ? 'text-green-600' : tx.type === 'expense' ? 'text-red-600' : 'text-amber-600'}`}>
-                      ₱{tx.amount}
-                    </span>
+            {/* Live Database Log */}
+            <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-xl h-80 overflow-y-auto">
+              <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-4">UI Transaction State</h2>
+              <div className="space-y-2">
+                {transactions.length === 0 && <p className="text-xs text-slate-600 font-mono">No records found.</p>}
+                {transactions.map((tx) => (
+                  <div key={tx.id} className="flex justify-between items-center text-xs p-3 bg-slate-950 rounded border border-slate-800 font-mono">
+                    <span className="truncate pr-4 text-slate-400 w-2/3">{tx.description || "[No desc]"}</span>
+                    <div className="flex items-center space-x-3">
+                      <span className={`px-2 py-0.5 rounded text-[10px] uppercase tracking-wider ${tx.type === 'income' ? 'bg-emerald-900/30 text-emerald-400' : tx.type === 'expense' ? 'bg-red-900/30 text-red-400' : 'bg-amber-900/30 text-amber-400'}`}>
+                        {tx.type}
+                      </span>
+                      <span className="text-slate-200">₱{tx.amount}</span>
+                    </div>
                   </div>
                 ))}
               </div>
             </div>
           </div>
 
-          {/* RIGHT COLUMN: Dashboard Visualization */}
-          <div className="lg:col-span-2 space-y-6">
+          {/* RIGHT PANEL: Data Visualization */}
+          <div className="lg:col-span-7 space-y-6">
             
             {/* Scorecards */}
             <div className="grid grid-cols-3 gap-4">
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                <p className="text-sm text-gray-500 font-medium">Total Benta</p>
-                <p className="text-2xl font-semibold text-gray-900 mt-1">₱{totalIncome}</p>
-              </div>
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                <p className="text-sm text-gray-500 font-medium">Total Gastos</p>
-                <p className="text-2xl font-semibold text-gray-900 mt-1">₱{totalExpense}</p>
-              </div>
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                <p className="text-sm text-gray-500 font-medium">Pautang</p>
-                <p className="text-2xl font-semibold text-gray-900 mt-1">₱{totalReceivable}</p>
-              </div>
+              <MetricCard title="System Income" value={totalIncome} colorClass="text-emerald-400" />
+              <MetricCard title="System Expense" value={totalExpense} colorClass="text-red-400" />
+              <MetricCard title="Active Receivables" value={totalReceivable} colorClass="text-amber-400" />
             </div>
 
-            {/* Chart */}
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 h-80">
-              <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-6">Cash Flow Overview</h2>
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={chartData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
-                  <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#6B7280' }} dy={10} />
-                  <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#6B7280' }} />
-                  <Tooltip 
-                    cursor={{ fill: 'transparent' }}
-                    contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}
-                  />
-                  <Bar dataKey="amount" radius={[4, 4, 0, 0]} maxBarSize={60} />
-                </BarChart>
-              </ResponsiveContainer>
+            {/* Analytics Chart */}
+            <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-xl h-[400px] flex flex-col">
+              <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-6">Cash Flow UI Mockup</h2>
+              <div className="flex-grow">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1E293B" />
+                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748B' }} dy={10} />
+                    <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748B' }} />
+                    <Tooltip 
+                      cursor={{ fill: '#0F172A' }}
+                      contentStyle={{ backgroundColor: '#020617', borderColor: '#1E293B', color: '#F8FAFC', borderRadius: '8px' }}
+                      itemStyle={{ color: '#F8FAFC' }}
+                    />
+                    <Bar dataKey="amount" radius={[4, 4, 0, 0]} maxBarSize={80} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
             </div>
+            
           </div>
-
         </div>
       </div>
     </div>
